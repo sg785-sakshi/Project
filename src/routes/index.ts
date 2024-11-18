@@ -4,27 +4,25 @@ import { getRuleBasedCharges, getRuleBasedChargesForLocation, getVendorsFromRout
 const router = Router();
 
 const CHUNK_SIZE = 5;
-const chunkData = (data: any, chunkSize: number) => {
-  const chunks = [];
+
+function* processData(data: any, chunkSize: number) {
   const dataValues = Object.values(data);
 
   for (let i = 0; i < dataValues.length; i += chunkSize) {
-    const chunk = dataValues.slice(i, i + chunkSize);
-    chunks.push(chunk);
+    yield dataValues.slice(i, i + chunkSize); // Yield chunk of data
   }
-
-  return chunks;
-};
+}
 
 router.post("/chargeTemplates", async (req, res) => {
   try {
     const { driverOrder } = req?.body?.loadInfo;
-
-    const chunks = chunkData(driverOrder, CHUNK_SIZE); // Split large dictionary into smaller chunks
     const results = [];
     
-    // Process each chunk
-    for (const chunk of chunks) {
+    const dataGenerator = processData(driverOrder, CHUNK_SIZE);
+    let orders = dataGenerator.next()
+    
+    while (!orders.done) {
+      const chunk = orders.value;
       let additionalInfo: any = req?.body?.additionalInfo;
       additionalInfo.vendorList = getVendorsFromRouting(chunk, "driver");
       const fetchMultiRulesChargesFromProfileGroup: any = await getRuleBasedCharges(
@@ -38,10 +36,9 @@ router.post("/chargeTemplates", async (req, res) => {
       );
 
       results.push(...fetchMultiRulesChargesFromProfileGroup, ...fetchedMultiLocationCharges);
-    }
-
-    return res.json({ data: results, hello: "hi" });
-
+      orders = dataGenerator.next();  // Request another set of customer order
+    }   
+    return res.json({ data: results });
   } catch (error: any) {
     console.error('Error processing request:', error);
     res.status(500).json({ error: error?.message });
